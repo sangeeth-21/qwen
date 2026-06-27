@@ -1,9 +1,19 @@
+import math
 import webbrowser
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PyQt6.QtCore import QRectF, Qt, QTimer
+from PyQt6.QtGui import (
+    QColor,
+    QFont,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPixmap,
+    QRadialGradient,
+)
 from PyQt6.QtWidgets import (
     QDialog,
+    QGraphicsBlurEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -13,20 +23,16 @@ from PyQt6.QtWidgets import (
 )
 
 from app.backend.config import settings
-from app.resources.icon import get_icon_path, get_small_icon_path
+from app.resources.icon import get_small_icon_path
 
 STYLE = """
 QDialog {
-    background-color: #0f0f1a;
-}
-QLabel {
-    color: #e8e8f0;
     background: transparent;
 }
 QLineEdit {
-    background-color: #1a1a2e;
+    background: rgba(255,255,255,0.06);
     color: white;
-    border: 2px solid #2a2a4a;
+    border: 1.5px solid rgba(255,255,255,0.12);
     border-radius: 14px;
     padding: 16px 20px;
     font-size: 15px;
@@ -34,10 +40,12 @@ QLineEdit {
     selection-background-color: #4361ee;
 }
 QLineEdit:focus {
-    border: 2px solid #4361ee;
+    border: 1.5px solid #4361ee;
+    background: rgba(67,97,238,0.08);
 }
 QPushButton#connect_btn {
-    background-color: #4361ee;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #4361ee, stop:1 #3a0ca3);
     color: white;
     border: none;
     border-radius: 14px;
@@ -47,40 +55,86 @@ QPushButton#connect_btn {
     min-height: 22px;
 }
 QPushButton#connect_btn:hover {
-    background-color: #3f37c9;
-}
-QPushButton#connect_btn:disabled {
-    background-color: #2a2a4a;
-    color: #666;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #4a6ff5, stop:1 #4a0ca3);
 }
 QPushButton#link_btn {
     background: transparent;
     color: #4cc9f0;
     border: none;
     font-size: 13px;
-    padding: 4px;
+    padding: 2px;
 }
-QPushButton#link_btn:hover {
-    color: #7dd3fc;
-}
+QPushButton#link_btn:hover { color: #7dd3fc; }
 QPushButton#skip_btn {
     background: transparent;
-    color: #555;
+    color: rgba(255,255,255,0.3);
     border: none;
     font-size: 13px;
     padding: 8px;
 }
-QPushButton#skip_btn:hover {
-    color: #888;
-}
+QPushButton#skip_btn:hover { color: rgba(255,255,255,0.6); }
 """
+
+
+class ParticleWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._particles = []
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update)
+        self._timer.start(30)
+        self._init_particles()
+
+    def _init_particles(self):
+        import random
+        for _ in range(20):
+            self._particles.append({
+                "x": random.uniform(0, 1),
+                "y": random.uniform(0, 1),
+                "vx": random.uniform(-0.002, 0.002),
+                "vy": random.uniform(-0.002, -0.006),
+                "size": random.uniform(1.5, 3.5),
+                "alpha": random.uniform(0.1, 0.4),
+            })
+
+    def _update(self):
+        for p in self._particles:
+            p["x"] += p["vx"]
+            p["y"] += p["vy"]
+            p["alpha"] -= 0.001
+            if p["y"] < -0.05 or p["alpha"] <= 0:
+                import random
+                p["x"] = random.uniform(0, 1)
+                p["y"] = 1.05
+                p["alpha"] = random.uniform(0.1, 0.4)
+                p["vx"] = random.uniform(-0.002, 0.002)
+                p["vy"] = random.uniform(-0.002, -0.006)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        for p in self._particles:
+            color = QColor(67, 97, 238)
+            color.setAlphaF(p["alpha"])
+            painter.setBrush(color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QRectF(
+                p["x"] * w - p["size"] / 2,
+                p["y"] * h - p["size"] / 2,
+                p["size"], p["size"]
+            ))
+        painter.end()
 
 
 class OnboardingDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Welcome to Qwen")
-        self.setFixedSize(500, 560)
+        self.setFixedSize(520, 580)
         self.setStyleSheet(STYLE)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog
@@ -93,66 +147,66 @@ class OnboardingDialog(QDialog):
     def _center_on_screen(self):
         screen = self.screen()
         if screen:
-            center = screen.availableGeometry().center()
-            self.move(int(center.x() - self.width() / 2), int(center.y() - self.height() / 2))
+            c = screen.availableGeometry().center()
+            self.move(int(c.x() - self.width() / 2), int(c.y() - self.height() / 2))
 
     def _setup_ui(self):
+        self._particles = ParticleWidget(self)
+        self._particles.setGeometry(0, 0, 520, 580)
+
         outer = QWidget(self)
-        outer.setGeometry(0, 0, 500, 560)
-        outer.setStyleSheet("""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #0f0f1a, stop:1 #1a1030);
-            border-radius: 24px;
-            border: 1px solid rgba(67,97,238,60);
-        """)
+        outer.setGeometry(0, 0, 520, 580)
 
         layout = QVBoxLayout(outer)
-        layout.setContentsMargins(44, 48, 44, 40)
-        layout.setSpacing(8)
+        layout.setContentsMargins(48, 50, 48, 40)
+        layout.setSpacing(6)
 
         icon_label = QLabel()
-        pixmap = QPixmap(get_small_icon_path()).scaled(
-            80, 80, Qt.AspectRatioMode.KeepAspectRatio,
+        pm = QPixmap(get_small_icon_path()).scaled(
+            88, 88, Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
         )
-        icon_label.setPixmap(pixmap)
+        icon_label.setPixmap(pm)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setStyleSheet("background: transparent;")
         layout.addWidget(icon_label)
-        layout.addSpacing(8)
+        layout.addSpacing(10)
 
         title = QLabel("Welcome to Qwen")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setFont(QFont("SF Pro Display", 26, QFont.Weight.Bold))
-        title.setStyleSheet("color: white; background: transparent;")
+        title.setFont(QFont("SF Pro Display", 28, QFont.Weight.Bold))
+        title.setStyleSheet("color: white; background: transparent; letter-spacing: -0.5px;")
         layout.addWidget(title)
 
         subtitle = QLabel(
-            "Your voice-powered AI assistant.\n"
-            "Say <b>\"Hey Qwen\"</b> to start a conversation."
+            "Your AI voice assistant.\n"
+            'Say <b>"Hey Qwen"</b> to start.'
         )
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setFont(QFont("SF Pro Text", 14))
-        subtitle.setStyleSheet("color: #9898b0; background: transparent; line-height: 1.5;")
+        subtitle.setStyleSheet("color: rgba(255,255,255,0.5); background: transparent;")
         layout.addWidget(subtitle)
-        layout.addSpacing(20)
+        layout.addSpacing(24)
 
-        api_label = QLabel("Google AI Studio API Key")
+        api_label = QLabel("API Key")
         api_label.setFont(QFont("SF Pro Text", 12, QFont.Weight.Medium))
-        api_label.setStyleSheet("color: #c0c0d0; background: transparent;")
+        api_label.setStyleSheet("color: rgba(255,255,255,0.6); background: transparent; padding-left: 2px;")
         layout.addWidget(api_label)
 
         self.api_input = QLineEdit()
-        self.api_input.setPlaceholderText("Paste your API key here...")
+        self.api_input.setPlaceholderText("Paste your Google AI Studio API key")
         self.api_input.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addWidget(self.api_input)
 
-        link_btn = QPushButton("Get a free API key →")
+        link_layout = QHBoxLayout()
+        link_layout.setContentsMargins(0, 0, 0, 0)
+        link_btn = QPushButton("Get a free key at Google AI Studio →")
         link_btn.setObjectName("link_btn")
         link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        link_btn.clicked.connect(
-            lambda: webbrowser.open("https://aistudio.google.com/apikey")
-        )
-        layout.addWidget(link_btn)
+        link_btn.clicked.connect(lambda: webbrowser.open("https://aistudio.google.com/apikey"))
+        link_layout.addWidget(link_btn)
+        link_layout.addStretch()
+        layout.addLayout(link_layout)
 
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -160,7 +214,7 @@ class OnboardingDialog(QDialog):
         self.status_label.setStyleSheet("color: #ff6b6b; background: transparent;")
         self.status_label.setVisible(False)
         layout.addWidget(self.status_label)
-        layout.addSpacing(12)
+        layout.addSpacing(16)
 
         self.connect_btn = QPushButton("Connect to Google AI Studio")
         self.connect_btn.setObjectName("connect_btn")
@@ -169,30 +223,37 @@ class OnboardingDialog(QDialog):
         self.connect_btn.setMinimumHeight(52)
         layout.addWidget(self.connect_btn)
 
-        skip_btn = QPushButton("Skip for now — I'll configure later")
+        skip_btn = QPushButton("Skip for now")
         skip_btn.setObjectName("skip_btn")
         skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         skip_btn.clicked.connect(self._skip)
         layout.addWidget(skip_btn)
-
         layout.addStretch()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(15, 15, 26))
-        painter.setPen(Qt.PenStyle.NoPen)
         rect = self.rect()
-        painter.drawRoundedRect(rect, 24, 24)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(rect), 28, 28)
+        gradient = QLinearGradient(0, 0, rect.width(), rect.height())
+        gradient.setColorAt(0, QColor(12, 12, 28, 240))
+        gradient.setColorAt(1, QColor(22, 14, 40, 240))
+        painter.setBrush(gradient)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPath(path)
+        painter.setPen(QColor(67, 97, 238, 50))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(rect).adjusted(1, 1, -1, -1), 28, 28)
 
     def _connect(self):
         key = self.api_input.text().strip()
         if not key:
-            self.status_label.setText("Please enter your API key")
+            self.status_label.setText("Enter your API key")
             self.status_label.setVisible(True)
             return
         if len(key) < 10:
-            self.status_label.setText("That doesn't look like a valid API key")
+            self.status_label.setText("Invalid API key format")
             self.status_label.setVisible(True)
             return
         settings.google_api_key = key

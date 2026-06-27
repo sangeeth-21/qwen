@@ -4,6 +4,7 @@ import threading
 
 import numpy as np
 import sounddevice as sd
+from faster_whisper import WhisperModel
 
 from app.backend.config import settings
 
@@ -17,17 +18,16 @@ class WakeWordEngine:
         self._audio_queue: queue.Queue = queue.Queue()
         self._callback = None
         self._stream: sd.InputStream | None = None
-        self._whisper_model = None
+        self._model: WhisperModel | None = None
 
-    def _get_whisper(self):
-        if self._whisper_model is None:
-            try:
-                from faster_whisper import WhisperModel
-                self._whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
-                logger.info("Wake word whisper model loaded")
-            except Exception as exc:
-                logger.warning("Wake word whisper failed: %s", exc)
-        return self._whisper_model
+    def load(self):
+        if self._model is not None:
+            return
+        try:
+            self._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+            logger.info("Wake word model loaded")
+        except Exception as exc:
+            logger.warning("Wake word model failed: %s", exc)
 
     def set_callback(self, callback):
         self._callback = callback
@@ -35,6 +35,7 @@ class WakeWordEngine:
     def start(self):
         if self._running:
             return
+        self.load()
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -55,16 +56,15 @@ class WakeWordEngine:
         if self._running:
             self._audio_queue.put(indata.copy())
 
-    def _detect_wake_word(self, audio: np.ndarray) -> bool:
-        model = self._get_whisper()
-        if model is None:
+    def _detect(self, audio: np.ndarray) -> bool:
+        if self._model is None:
             return False
         try:
-            segments, _ = model.transcribe(audio, language="en")
+            segments, _ = self._model.transcribe(audio, language="en")
             text = " ".join(seg.text.strip().lower() for seg in segments)
-            for phrase in ["hey qwen", "hey queen", "hay queen", "hey q wen"]:
+            for phrase in ["hey qwen", "hey queen", "hay queen", "hey q wen", "hey quin"]:
                 if phrase in text:
-                    logger.info("Wake word matched: '%s'", text)
+                    logger.info("Wake word: '%s'", text)
                     return True
         except Exception:
             pass
@@ -85,9 +85,9 @@ class WakeWordEngine:
                 chunk = self._audio_queue.get(timeout=0.05)
                 buffer = np.concatenate([buffer, chunk.flatten()])
                 if len(buffer) >= 32000:
-                    audio_segment = buffer[:32000]
+                    segment = buffer[:32000]
                     buffer = buffer[16000:]
-                    if settings.wake_word_enabled and self._detect_wake_word(audio_segment):
+                    if settings.wake_word_enabled and self._detect(segment):
                         if self._callback:
                             self._callback()
             except queue.Empty:
